@@ -4,67 +4,61 @@ import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import dagger.hilt.android.lifecycle.HiltViewModel
-import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
-import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.launch
 import vk.education.android.dev.domain.AppDetails
-import vk.education.android.dev.domain.AppRepository
-import vk.education.android.dev.domain.InstallState
+import vk.education.android.dev.domain.AppDetailsRepository
 import javax.inject.Inject
-import kotlin.time.Duration.Companion.milliseconds
 
-data class AppDetailsUiState(
-    val details: AppDetails? = null,
-    val installState: InstallState = InstallState.NotInstalled
+data class AppDetailsState(
+    val isLoading: Boolean = true,
+    val appDetails: AppDetails? = null,
+    val error: String? = null
 )
 
 @HiltViewModel
 class AppDetailsViewModel @Inject constructor(
-    private val repository: AppRepository,
+    private val repository: AppDetailsRepository,
     savedStateHandle: SavedStateHandle
 ) : ViewModel() {
 
-    private val appId: String = savedStateHandle["appId"] ?: ""
-    private val _state = MutableStateFlow(AppDetailsUiState())
+    private val appId: String = savedStateHandle["appId"] ?: "1"
+
+    private val _state = MutableStateFlow(AppDetailsState())
     val state = _state.asStateFlow()
 
-    private var installJob: Job? = null
-
     init {
-        loadDetails()
+        loadInitialData()
+        observeAppDetails()
     }
 
-    private fun loadDetails() {
+    private fun loadInitialData() {
         viewModelScope.launch {
-            val details = repository.getAppDetails(appId)
-            _state.update { it.copy(details = details) }
-        }
-    }
-
-    fun onInstallClick() {
-        val currentState = _state.value.installState
-
-        if (currentState is InstallState.Installing) {
-            installJob?.cancel()
-            _state.update { it.copy(installState = InstallState.NotInstalled) }
-        } else {
-            installJob = viewModelScope.launch {
-                try {
-                    emulateInstall()
-                } catch (_: Exception) {
-                }
+            try {
+                repository.getAppDetails(appId)
+                _state.value = _state.value.copy(isLoading = false)
+            } catch (e: Exception) {
+                _state.value = _state.value.copy(isLoading = false, error = e.message)
             }
         }
     }
 
-    private suspend fun emulateInstall() {
-        for (progress in 0..100 step 5) {
-            _state.update { it.copy(installState = InstallState.Installing(progress)) }
-            delay(150.milliseconds)
+    private fun observeAppDetails() {
+        viewModelScope.launch {
+            repository.observeAppDetails(appId)
+                .collect { appDetails ->
+                    _state.value = _state.value.copy(
+                        isLoading = false,
+                        appDetails = appDetails
+                    )
+                }
         }
-        _state.update { it.copy(installState = InstallState.Installed) }
+    }
+
+    fun toggleWishlist() {
+        viewModelScope.launch {
+            repository.toggleWishlist(appId)
+        }
     }
 }
